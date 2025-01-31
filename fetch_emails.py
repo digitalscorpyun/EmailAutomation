@@ -11,7 +11,8 @@ CREDENTIALS_FILE = "credentials.json"
 
 # 🗂️ Path to Obsidian Inbox
 OBSIDIAN_DIR = "C:/Users/miker/Knowledge Hub/Inbox"
-OBSIDIAN_PATH = os.path.join(OBSIDIAN_DIR, "Emails.md")
+OBSIDIAN_PATH = "C:/Users/miker/Knowledge Hub/Inbox/Emails.md"
+
 
 # 🔍 Keywords to mark emails as 🔴 important
 IMPORTANT_KEYWORDS = ["urgent", "action required", "important", "security alert", "warning"]
