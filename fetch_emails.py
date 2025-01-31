@@ -1,76 +1,137 @@
+# Fetch Emails Script for Gmail Automation
+
+## Overview
+This script automates email retrieval from Gmail using **OAuth2 authentication**. It fetches unread emails and saves them into **text and CSV formats** for easy access.
+
+---
+
+## 🔧 Setup
+
+### 1️⃣ Install Required Packages
+Run this command in PowerShell:
+```powershell
+pip install --upgrade google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
+```
+
+### 2️⃣ Move Credentials File
+Ensure `credentials.json` is placed in the **EmailAutomation** folder:
+```powershell
+Move-Item -Path "C:\Users\miker\Downloads\credentials.json" -Destination "C:\Users\miker\EmailAutomation\credentials.json"
+```
+
+### 3️⃣ Run the Script
+```powershell
+python fetch_emails.py
+```
+
+---
+
+## 📝 Full Script (`fetch_emails.py`)
+```python
 import os
 import pickle
 import base64
-import json
-import time
+import csv
 from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
-# Constants
+# Gmail API Scope for reading emails
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-TOKEN_PATH = "token.json"
-CREDENTIALS_PATH = "credentials.json"
+
+# File paths
+TOKEN_FILE = "token.json"
+CREDENTIALS_FILE = "credentials.json"
+EMAIL_TEXT_FILE = "emails.txt"
+EMAIL_CSV_FILE = "emails.csv"
 
 def authenticate_gmail():
-    """Authenticate user with OAuth2 and handle token refreshing."""
+    """Authenticate and return the Gmail API service using OAuth2."""
     creds = None
-
-    # Load saved token if it exists
-    if os.path.exists(TOKEN_PATH):
-        with open(TOKEN_PATH, "rb") as token:
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, "rb") as token:
             creds = pickle.load(token)
-
-    # Refresh the token if it's expired
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            print("[✅] Token refreshed successfully!")
-        except Exception as e:
-            print(f"[❌] Failed to refresh token: {e}")
-            creds = None
-
-    # If there are no (valid) credentials available, prompt user to log in
     if not creds or not creds.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-        creds = flow.run_local_server(port=0)
-
-        # Save the credentials for future use
-        with open(TOKEN_PATH, "wb") as token:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(TOKEN_FILE, "wb") as token:
             pickle.dump(creds, token)
-            print("[✅] Token saved successfully!")
-
-    return creds
+    return build("gmail", "v1", credentials=creds)
 
 def fetch_unread_emails():
-    """Fetch unread emails from Gmail"""
-    creds = authenticate_gmail()
-    
-    try:
-        service = build("gmail", "v1", credentials=creds)
-        results = service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread").execute()
-        messages = results.get("messages", [])
+    """Fetch unread emails from Gmail inbox."""
+    service = authenticate_gmail()
+    results = service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread").execute()
+    messages = results.get("messages", [])
+    email_list = []
+    if not messages:
+        print("No unread emails found.")
+        return email_list
+    for msg in messages:
+        msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
+        headers = msg_data["payload"]["headers"]
+        email_from = next((h["value"] for h in headers if h["name"] == "From"), "Unknown")
+        email_subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
+        email_list.append({"from": email_from, "subject": email_subject})
+    return email_list
 
-        if not messages:
-            print("[📭] No unread emails found.")
-            return
+def save_emails_to_file(email_list):
+    """Save fetched emails to a text file."""
+    with open(EMAIL_TEXT_FILE, "w", encoding="utf-8") as f:
+        for email in email_list:
+            f.write(f"📧 From: {email['from']}\n📜 Subject: {email['subject']}\n\n")
+    print(f"📄 Emails saved to {EMAIL_TEXT_FILE}")
 
-        print(f"[📩] You have {len(messages)} unread emails.")
-
-        for msg in messages:
-            msg_id = msg["id"]
-            message = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
-            
-            # Extract email details
-            headers = message["payload"]["headers"]
-            subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
-            sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
-            
-            print(f"\n📧 **From:** {sender}\n📜 **Subject:** {subject}")
-
-    except HttpError as error:
-        print(f"[❌] An error occurred: {error}")
+def save_emails_to_csv(email_list):
+    """Save fetched emails to a CSV file."""
+    with open(EMAIL_CSV_FILE, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["From", "Subject"])
+        for email in email_list:
+            writer.writerow([email["from"], email["subject"]])
+    print(f"📊 Emails saved to {EMAIL_CSV_FILE}")
 
 if __name__ == "__main__":
-    fetch_unread_emails()
+    emails = fetch_unread_emails()
+    if emails:
+        save_emails_to_file(emails)
+        save_emails_to_csv(emails)
+    else:
+        print("📭 No new unread emails.")
+```
+
+---
+
+## 📌 Next Steps
+
+### 4️⃣ Verify Saved Emails
+- Open the text file:
+  ```powershell
+  notepad emails.txt
+  ```
+- Open the CSV file:
+  ```powershell
+  start excel emails.csv
+  ```
+
+### 5️⃣ Confirm Token is Saved
+```powershell
+Get-ChildItem -Path "C:\Users\miker\EmailAutomation" -Filter "token.json"
+```
+- If `token.json` exists, OAuth authentication is working, and you won’t need to log in again. 🎉
+
+### 6️⃣ Push Changes to GitHub
+```powershell
+git add fetch_emails.py
+git commit -m "Updated fetch_emails.py with OAuth2 automation"
+git push origin main
+```
+
+---
+
+This is now fully automated and stored in Obsidian for reference. 🚀 Let me know if you need modifications!
+
