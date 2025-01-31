@@ -1,66 +1,76 @@
 import os
+import pickle
 import base64
 import json
-import pickle
+import time
 from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-# Define the Gmail API scope
+# Constants
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-
-# Path to the credentials JSON file
+TOKEN_PATH = "token.json"
 CREDENTIALS_PATH = "credentials.json"
-TOKEN_PATH = "token.pickle"
 
 def authenticate_gmail():
-    """Authenticate with Gmail API using OAuth2 and return the service object."""
+    """Authenticate user with OAuth2 and handle token refreshing."""
     creds = None
 
-    # Load existing token if available
+    # Load saved token if it exists
     if os.path.exists(TOKEN_PATH):
         with open(TOKEN_PATH, "rb") as token:
             creds = pickle.load(token)
 
-    # If no valid credentials, log in and create a new token
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+    # Refresh the token if it's expired
+    if creds and creds.expired and creds.refresh_token:
+        try:
             creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-            creds = flow.run_local_server(port=0)
+            print("[✅] Token refreshed successfully!")
+        except Exception as e:
+            print(f"[❌] Failed to refresh token: {e}")
+            creds = None
 
-        # Save credentials for future use
+    # If there are no (valid) credentials available, prompt user to log in
+    if not creds or not creds.valid:
+        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
+        creds = flow.run_local_server(port=0)
+
+        # Save the credentials for future use
         with open(TOKEN_PATH, "wb") as token:
             pickle.dump(creds, token)
+            print("[✅] Token saved successfully!")
 
-    return build("gmail", "v1", credentials=creds)
+    return creds
 
 def fetch_unread_emails():
-    """Fetch unread emails from Gmail."""
-    service = authenticate_gmail()
+    """Fetch unread emails from Gmail"""
+    creds = authenticate_gmail()
+    
+    try:
+        service = build("gmail", "v1", credentials=creds)
+        results = service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread").execute()
+        messages = results.get("messages", [])
 
-    # Get unread emails
-    results = service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread").execute()
-    messages = results.get("messages", [])
+        if not messages:
+            print("[📭] No unread emails found.")
+            return
 
-    if not messages:
-        print("No unread emails found.")
-        return
+        print(f"[📩] You have {len(messages)} unread emails.")
 
-    print(f"Found {len(messages)} unread emails:\n")
+        for msg in messages:
+            msg_id = msg["id"]
+            message = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+            
+            # Extract email details
+            headers = message["payload"]["headers"]
+            subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
+            sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
+            
+            print(f"\n📧 **From:** {sender}\n📜 **Subject:** {subject}")
 
-    # Retrieve email details
-    for msg in messages[:5]:  # Limit to 5 emails for now
-        msg_id = msg["id"]
-        msg_data = service.users().messages().get(userId="me", id=msg_id).execute()
-        headers = msg_data["payload"]["headers"]
-
-        subject = next((header["value"] for header in headers if header["name"] == "Subject"), "No Subject")
-        sender = next((header["value"] for header in headers if header["name"] == "From"), "Unknown Sender")
-
-        print(f"📧 From: {sender}\n   Subject: {subject}\n   ID: {msg_id}\n")
+    except HttpError as error:
+        print(f"[❌] An error occurred: {error}")
 
 if __name__ == "__main__":
     fetch_unread_emails()
