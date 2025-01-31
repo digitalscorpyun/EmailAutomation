@@ -122,7 +122,7 @@ if __name__ == "__main__":
 ```powershell
 Get-ChildItem -Path "C:\Users\miker\EmailAutomation" -Filter "token.json"
 ```
-- If `token.json` exists, OAuth authentication is working, and you won’t need to log in again. 🎉
+- If `token.json` exists, OAuth authentication is working, and you won't need to log in again. 🎉
 
 ### 6️⃣ Push Changes to GitHub
 ```powershell
