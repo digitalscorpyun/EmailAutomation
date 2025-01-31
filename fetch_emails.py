@@ -1,13 +1,8 @@
 import os
-import pickle
-import base64
-import re
 import json
-import datetime
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from email import message_from_bytes
 
 # 🔑 OAuth & Gmail API Setup
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -15,7 +10,8 @@ TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
 
 # 🗂️ Path to Obsidian Inbox
-OBSIDIAN_PATH = "C:/Users/miker/Knowledge Hub/Inbox/Emails.md"  # Adjust path
+OBSIDIAN_DIR = "C:/Users/miker/Knowledge Hub/Inbox"
+OBSIDIAN_PATH = os.path.join(OBSIDIAN_DIR, "Emails.md")
 
 # 🔍 Keywords to mark emails as 🔴 important
 IMPORTANT_KEYWORDS = ["urgent", "action required", "important", "security alert", "warning"]
@@ -27,7 +23,7 @@ def authenticate_gmail():
         creds = Credentials.from_authorized_user_file(TOKEN_FILE)
     if not creds or not creds.valid:
         flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-        creds = flow.run_local_server(port=0)
+        creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")  # Force refresh token
         with open(TOKEN_FILE, "w") as token:
             token.write(creds.to_json())
     return creds
@@ -63,7 +59,9 @@ def fetch_unread_emails():
     return email_list
 
 def save_to_obsidian(email_list):
-    """Save emails in Obsidian markdown format."""
+    """Save emails in Obsidian markdown format, ensuring the directory exists."""
+    os.makedirs(OBSIDIAN_DIR, exist_ok=True)  # Ensure the directory exists
+
     with open(OBSIDIAN_PATH, "w", encoding="utf-8") as f:
         f.write("# 📩 Email Summaries\n\n")
         for email in email_list:
