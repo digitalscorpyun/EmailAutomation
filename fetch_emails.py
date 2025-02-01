@@ -19,7 +19,7 @@ OBSIDIAN_PATH = "C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md
 SMTP_SERVER = "smtp.office365.com"  # Outlook SMTP
 SMTP_PORT = 587
 OUTLOOK_EMAIL = "mikekibbe73@outlook.com"  # Your personal email
-OUTLOOK_PASSWORD = "YOUR_OUTLOOK_PASSWORD"  # ⚠️ Store this securely in an env variable!
+OUTLOOK_PASSWORD = os.getenv("OUTLOOK_PASSWORD")  # ⚠️ Store this securely in an env variable!
 
 # 🔍 Important Categories
 IMPORTANT_SENDERS = {
