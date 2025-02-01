@@ -51,6 +51,7 @@ def fetch_unread_emails():
         "💼 Job Alerts": [],
         "✉️ General Emails": []
     }
+    unique_senders = set()
 
     for msg in messages:
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
@@ -58,6 +59,8 @@ def fetch_unread_emails():
         subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
         sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
         date_received = next((h["value"] for h in headers if h["name"] == "Date"), "Unknown Date")
+
+        unique_senders.add(sender)  # Collect sender for summary list
 
         # Categorization based on senders and keywords
         category = "✉️ General Emails"
@@ -79,10 +82,10 @@ def fetch_unread_emails():
         # ✅ Mark email as read after processing
         service.users().messages().modify(userId="me", id=msg["id"], body={"removeLabelIds": ["UNREAD"]}).execute()
 
-    return categorized_emails
+    return categorized_emails, sorted(unique_senders)
 
-def save_to_obsidian(email_categories):
-    """Save categorized emails in Obsidian markdown format."""
+def save_to_obsidian(email_categories, senders_list):
+    """Save categorized emails and sender list in Obsidian markdown format."""
     with open(OBSIDIAN_PATH, "w", encoding="utf-8") as f:
         f.write("# 📩 Email Summaries\n\n")
         for category, emails in email_categories.items():
@@ -92,13 +95,19 @@ def save_to_obsidian(email_categories):
                 f.write(f"📅 **Received:** {email['date']}\n")
                 f.write(f"📝 **Summary:** {email['subject']}\n\n")
                 f.write("---\n")
+        
+        # 📜 Add Bulleted List of Unique Senders
+        f.write("\n## 🔹 Email Senders\n\n")
+        for sender in senders_list:
+            f.write(f"- {sender}\n")
+
     print(f"✅ Emails synced to Obsidian at {OBSIDIAN_PATH}")
 
 if __name__ == "__main__":
     print("📩 Fetching unread emails...")
-    categorized_emails = fetch_unread_emails()
+    categorized_emails, unique_senders = fetch_unread_emails()
     if any(categorized_emails.values()):
-        save_to_obsidian(categorized_emails)
+        save_to_obsidian(categorized_emails, unique_senders)
         print("✅ Email fetching complete!")
     else:
         print("📭 No matching emails found.")
