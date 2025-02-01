@@ -7,7 +7,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-# 🔑 OAuth & Gmail API Setup
+# 🔑 OAuth & Gmail API Setup (Readonly to leave emails unread)
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
@@ -59,6 +59,7 @@ def fetch_unread_emails():
         "💼 Job Alerts": [], "✉️ General Emails": []
     }
     notification_emails = []
+    unique_senders = set()
 
     for msg in messages:
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
@@ -66,6 +67,8 @@ def fetch_unread_emails():
         subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
         sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
         date_received = next((h["value"] for h in headers if h["name"] == "Date"), "Unknown Date")
+
+        unique_senders.add(sender)  # Collect senders for bulleted list
 
         # Categorization based on senders or keywords
         category = "✉️ General Emails"
@@ -86,12 +89,20 @@ def fetch_unread_emails():
         if category != "✉️ General Emails":
             notification_emails.append(email_entry)
 
-    return categorized_emails, notification_emails
+    return categorized_emails, notification_emails, unique_senders
 
-def save_to_obsidian(email_categories):
+def save_to_obsidian(email_categories, senders):
     """Save categorized emails in Obsidian markdown format."""
     with open(OBSIDIAN_PATH, "w", encoding="utf-8") as f:
         f.write("# 📩 Email Summaries\n\n")
+
+        # Sender list
+        f.write("## 📜 Email Senders\n\n")
+        for sender in sorted(senders):
+            f.write(f"- {sender}\n")
+        f.write("\n---\n")
+
+        # Categorized emails
         for category, emails in email_categories.items():
             f.write(f"## {category}\n\n")
             for email in emails:
@@ -133,10 +144,10 @@ def send_outlook_notification(emails):
 
 if __name__ == "__main__":
     print("📩 Fetching unread emails...")
-    categorized_emails, notification_emails = fetch_unread_emails()
+    categorized_emails, notification_emails, unique_senders = fetch_unread_emails()
     
     if any(categorized_emails.values()):
-        save_to_obsidian(categorized_emails)
+        save_to_obsidian(categorized_emails, unique_senders)
         send_outlook_notification(notification_emails)
         print("✅ Email fetching complete!")
     else:
