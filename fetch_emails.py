@@ -1,154 +1,130 @@
+import imaplib
+import email
 import os
-import json
 import smtplib
-import ssl
-from email.message import EmailMessage
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+from email.mime.text import MIMEText
+from datetime import datetime
 
-# 🔑 OAuth & Gmail API Setup (Readonly to leave emails unread)
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-TOKEN_FILE = "token.json"
-CREDENTIALS_FILE = "credentials.json"
+# --------------------------------
+# CONFIGURATION
+# --------------------------------
 
-# 📂 Path to Obsidian Inbox
-OBSIDIAN_PATH = "C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
+# Outlook IMAP Settings
+IMAP_SERVER = "outlook.office365.com"
+IMAP_PORT = 993
+OUTLOOK_USER = "your_outlook_email@outlook.com"
+OUTLOOK_PASSWORD = "your_outlook_password_or_app_password"
 
-# 📧 Outlook Email Configuration
-OUTLOOK_EMAIL = "mikekibbe73@outlook.com"
-OUTLOOK_PASSWORD = os.getenv("OUTLOOK_PASSWORD")  # Securely stored in environment variable
-SMTP_SERVER = "smtp.office365.com"
+# Gmail SMTP Settings (for notifications)
+SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
+GMAIL_USER = "your_gmail@gmail.com"
+GMAIL_PASSWORD = "your_gmail_app_password"
+TO_EMAIL = "your_gmail@gmail.com"  # Notification recipient
 
-# 🔍 Important Senders & Keywords for Filtering
-IMPORTANT_SENDERS = {
-    "jobalerts-noreply@linkedin.com": "💼 Job Alerts",
-    "breakingnews@nytimes.com": "📰 Breaking News",
-}
-IMPORTANT_KEYWORDS = {
-    "Intellisearch", "Help Desk Analyst", "Robert Half", "hiring",
-    "Atomwaffen Division", "BRICS", "Claudia Sheinbaum", "Daniel Dale",
-    "DEI revolution", "Dr. Greg Carr", "@AfricanaCarr", "Alex Padilla",
-    "Howard French", "Sheikh Tahnoun bin Zayed al Nahyan", "Stargate",
-    "Vera C. Rubin Observatory", "Wharf Jérémie"
-}
+# Obsidian File Path
+OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
 
-def authenticate_gmail():
-    """Authenticate with Gmail API using OAuth2."""
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE)
-    if not creds or not creds.valid:
-        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-        creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
-    return creds
+# Number of emails to fetch
+EMAIL_LIMIT = 10  # Adjust as needed
 
-def fetch_unread_emails():
-    """Fetch unread emails from Gmail, categorize, and filter them."""
-    creds = authenticate_gmail()
-    service = build("gmail", "v1", credentials=creds)
+# --------------------------------
+# FETCH EMAILS
+# --------------------------------
+def fetch_emails():
+    try:
+        print("🔄 Connecting to Outlook IMAP server...")
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+        mail.login(OUTLOOK_USER, OUTLOOK_PASSWORD)
+        mail.select("inbox")
 
-    results = service.users().messages().list(userId="me", labelIds=["INBOX"], q="is:unread").execute()
-    messages = results.get("messages", [])
+        # Search for all emails
+        result, data = mail.search(None, "ALL")
+        email_ids = data[0].split()[-EMAIL_LIMIT:]  # Fetch latest X emails
 
-    categorized_emails = {
-        "📌 Important Emails": [], "📢 Breaking News": [],
-        "💼 Job Alerts": [], "✉️ General Emails": []
-    }
-    notification_emails = []
-    unique_senders = set()
+        email_entries = []
+        for num in email_ids:
+            result, msg_data = mail.fetch(num, "(RFC822)")
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    raw_email = response_part[1]
+                    msg = email.message_from_bytes(raw_email)
 
-    for msg in messages:
-        msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
-        headers = msg_data["payload"]["headers"]
-        subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
-        sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
-        date_received = next((h["value"] for h in headers if h["name"] == "Date"), "Unknown Date")
+                    subject = msg["Subject"] or "(No Subject)"
+                    sender = msg["From"] or "(Unknown Sender)"
+                    date = msg["Date"] or "(No Date)"
+                    body = ""
 
-        unique_senders.add(sender)  # Collect senders for bulleted list
+                    # Extract email body
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            content_type = part.get_content_type()
+                            if content_type == "text/plain":
+                                body = part.get_payload(decode=True).decode(errors="ignore")
+                                break
+                    else:
+                        body = msg.get_payload(decode=True).decode(errors="ignore")
 
-        # Categorization based on senders or keywords
-        category = "✉️ General Emails"
-        for keyword in IMPORTANT_KEYWORDS:
-            if keyword.lower() in subject.lower():
-                category = "📢 Breaking News"
-                break
-        for key, value in IMPORTANT_SENDERS.items():
-            if key in sender:
-                category = value
-                break
+                    # Format email entry
+                    email_entry = f"### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body}\n---\n"
+                    email_entries.append(email_entry)
 
-        # Append email data
-        email_entry = {"from": sender, "subject": subject, "date": date_received}
-        categorized_emails[category].append(email_entry)
+        mail.logout()
+        return email_entries
 
-        # Track important emails for notification
-        if category != "✉️ General Emails":
-            notification_emails.append(email_entry)
+    except Exception as e:
+        print(f"⚠️ Error fetching emails: {e}")
+        return []
 
-    return categorized_emails, notification_emails, unique_senders
+# --------------------------------
+# SAVE TO OBSIDIAN
+# --------------------------------
+def save_to_obsidian(emails):
+    try:
+        if not emails:
+            print("⚠️ No new emails found.")
+            return False
 
-def save_to_obsidian(email_categories, senders):
-    """Save categorized emails in Obsidian markdown format."""
-    with open(OBSIDIAN_PATH, "w", encoding="utf-8") as f:
-        f.write("# 📩 Email Summaries\n\n")
+        os.makedirs(os.path.dirname(OBSIDIAN_PATH), exist_ok=True)
 
-        # Sender list
-        f.write("## 📜 Email Senders\n\n")
-        for sender in sorted(senders):
-            f.write(f"- {sender}\n")
-        f.write("\n---\n")
+        with open(OBSIDIAN_PATH, "a", encoding="utf-8") as f:
+            f.write(f"\n## 🗓️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("\n".join(emails))
+        
+        print(f"✅ Emails synced to Obsidian at {OBSIDIAN_PATH}")
+        return True
 
-        # Categorized emails
-        for category, emails in email_categories.items():
-            f.write(f"## {category}\n\n")
-            for email in emails:
-                f.write(f"### {email['subject']}\n")
-                f.write(f"**From:** {email['from']}\n")
-                f.write(f"**Received:** {email['date']}\n\n")
-                f.write("---\n")
-    print(f"✅ Emails synced to Obsidian at {OBSIDIAN_PATH}")
+    except Exception as e:
+        print(f"⚠️ Error saving to Obsidian: {e}")
+        return False
 
-def send_outlook_notification(emails):
-    """Send an email notification for filtered important emails."""
-    if not emails:
-        return  # No important emails to notify
+# --------------------------------
+# SEND EMAIL NOTIFICATION
+# --------------------------------
+def send_email_notification(success=True):
+    subject = "✅ Email Sync Successful" if success else "⚠️ Email Sync Failed"
+    body = f"Email sync to Obsidian completed successfully!\nFile saved at: {OBSIDIAN_PATH}" if success else "Email sync encountered an issue."
+
+    msg = MIMEText(body)
+    msg["From"] = GMAIL_USER
+    msg["To"] = TO_EMAIL
+    msg["Subject"] = subject
 
     try:
-        message = EmailMessage()
-        message["Subject"] = "🚀 Important Gmail Updates"
-        message["From"] = OUTLOOK_EMAIL
-        message["To"] = OUTLOOK_EMAIL
-
-        body = "# 🚀 Important Emails Found\n\n"
-        for email in emails:
-            body += f"- **{email['subject']}**\n"
-            body += f"  📧 From: {email['from']}\n"
-            body += f"  📅 Received: {email['date']}\n\n"
-        message.set_content(body)
-
-        # Send email via Outlook SMTP
-        context = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls(context=context)
-            server.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
-            server.send_message(message)
-        
-        print("📧 Notification email sent successfully.")
-    
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(GMAIL_USER, GMAIL_PASSWORD)
+        server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
+        server.quit()
+        print("✅ Email notification sent successfully!")
     except Exception as e:
         print(f"⚠️ Email notification failed: {e}")
 
+# --------------------------------
+# MAIN EXECUTION
+# --------------------------------
 if __name__ == "__main__":
-    print("📩 Fetching unread emails...")
-    categorized_emails, notification_emails, unique_senders = fetch_unread_emails()
-    
-    if any(categorized_emails.values()):
-        save_to_obsidian(categorized_emails, unique_senders)
-        send_outlook_notification(notification_emails)
-        print("✅ Email fetching complete!")
-    else:
-        print("📭 No matching emails found.")
+    emails = fetch_emails()
+    success = save_to_obsidian(emails)
+    send_email_notification(success)
+    print("✅ Email fetching complete!")
