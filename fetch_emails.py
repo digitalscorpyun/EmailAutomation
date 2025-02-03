@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import datetime
+import re
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -14,6 +15,7 @@ CREDENTIALS_FILE = "credentials.json"
 TOKEN_FILE = "token.json"
 OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
 EMAIL_LIMIT = 10  # Number of emails to fetch
+MAX_BODY_LENGTH = 600  # Limit email body preview length
 
 # --------------------------------
 # AUTHENTICATE GMAIL API
@@ -31,7 +33,7 @@ def authenticate_gmail():
             creds = flow.run_local_server(port=0)
             with open(TOKEN_FILE, "w") as token:
                 token.write(creds.to_json())
-    
+
     return creds
 
 # --------------------------------
@@ -66,9 +68,27 @@ def fetch_emails():
                     if part["mimeType"] == "text/plain":
                         body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="ignore")
                         break
-            
-            # Format email entry
-            email_entry = f"### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body}\n---\n"
+
+            # Remove tracking links and unsubscribe links
+            body = re.sub(r'https?://\S+', '', body)  # Remove URLs
+            body = re.sub(r'Unsubscribe.*', '', body, flags=re.IGNORECASE)  # Remove unsubscribe text
+
+            # Trim body if too long
+            if len(body) > MAX_BODY_LENGTH:
+                body = body[:MAX_BODY_LENGTH] + "...\n\n[Read More in Gmail]"
+
+            # Format email entry with a collapsible section
+            email_entry = (
+                f"## 📬 {subject}\n"
+                f"- **📧 From:** {sender}\n"
+                f"- **📅 Date:** {date}\n\n"
+                f"### 📜 Email Content\n"
+                f"<details>\n"
+                f"  <summary>Click to expand</summary>\n\n"
+                f"  {body}\n\n"
+                f"</details>\n\n"
+                f"---\n"
+            )
             email_entries.append(email_entry)
 
         return email_entries
@@ -90,7 +110,7 @@ def save_to_obsidian(emails):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with open(OBSIDIAN_PATH, "a", encoding="utf-8") as f:
-            f.write(f"\n## 🗓️ Email Sync: {timestamp}\n")
+            f.write(f"\n# 📬 Email Sync Log ({timestamp})\n\n")
             f.write("\n".join(emails))
         
         print(f"✅ Emails successfully saved to Obsidian: {OBSIDIAN_PATH}")
