@@ -1,137 +1,68 @@
-import imaplib
-import email
 import os
-import smtplib
-from email.mime.text import MIMEText
-from datetime import datetime
+import base64
+import json
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 
 # --------------------------------
 # CONFIGURATION
 # --------------------------------
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+TOKEN_FILE = "token.json"  # Stores OAuth2 tokens
+CREDENTIALS_FILE = "credentials.json"  # OAuth2 credentials file
 
-# Gmail IMAP Settings
-IMAP_SERVER = "imap.gmail.com"
-IMAP_PORT = 993
-GMAIL_USER = "mikerkibbe73@gmail.com"
-GMAIL_PASSWORD = "w00d$On!"
-
-# Gmail SMTP Settings (for notifications)
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-TO_EMAIL = "mikerkibbe73@gmail.com"  # Notification recipient
-
-# Obsidian File Path
-OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
-
-# Number of emails to fetch
-EMAIL_LIMIT = 10  # Adjust as needed
+# --------------------------------
+# AUTHENTICATE WITH GMAIL
+# --------------------------------
+def authenticate_gmail():
+    creds = None
+    if os.path.exists(TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(TOKEN_FILE, "w") as token:
+            token.write(creds.to_json())
+    return creds
 
 # --------------------------------
 # FETCH EMAILS
 # --------------------------------
 def fetch_emails():
-    """
-    Fetches the latest emails from the Gmail inbox.
-    """
-    try:
-        print("🔄 Connecting to Gmail IMAP server...")
-        mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
-        mail.login(GMAIL_USER, GMAIL_PASSWORD)
-        mail.select("inbox")
+    creds = authenticate_gmail()
+    service = build("gmail", "v1", credentials=creds)
+    results = service.users().messages().list(userId="me", maxResults=10).execute()
+    messages = results.get("messages", [])
 
-        # Search for all emails
-        result, data = mail.search(None, "ALL")
-        email_ids = data[0].split()[-EMAIL_LIMIT:]  # Fetch latest X emails
+    email_entries = []
+    for msg in messages:
+        msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
+        headers = msg_data["payload"]["headers"]
 
-        email_entries = []
-        for num in email_ids:
-            result, msg_data = mail.fetch(num, "(RFC822)")
-            for response_part in msg_data:
-                if isinstance(response_part, tuple):
-                    raw_email = response_part[1]
-                    msg = email.message_from_bytes(raw_email)
+        subject = next((h["value"] for h in headers if h["name"] == "Subject"), "(No Subject)")
+        sender = next((h["value"] for h in headers if h["name"] == "From"), "(Unknown Sender)")
+        date = next((h["value"] for h in headers if h["name"] == "Date"), "(No Date)")
 
-                    subject = msg["Subject"] or "(No Subject)"
-                    sender = msg["From"] or "(Unknown Sender)"
-                    date = msg["Date"] or "(No Date)"
-                    body = ""
+        body = ""
+        if "data" in msg_data["payload"]["body"]:
+            body = base64.urlsafe_b64decode(msg_data["payload"]["body"]["data"]).decode("utf-8", errors="ignore")
 
-                    # Extract email body
-                    if msg.is_multipart():
-                        for part in msg.walk():
-                            content_type = part.get_content_type()
-                            if content_type == "text/plain":
-                                body = part.get_payload(decode=True).decode(errors="ignore")
-                                break
-                    else:
-                        body = msg.get_payload(decode=True).decode(errors="ignore")
+        email_entry = f"### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body}\n---\n"
+        email_entries.append(email_entry)
 
-                    # Format email entry
-                    email_entry = f"### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body}\n---\n"
-                    email_entries.append(email_entry)
-
-        mail.logout()
-        return email_entries
-
-    except Exception as e:
-        print(f"⚠️ Error fetching emails: {e}")
-        return []
-
-# --------------------------------
-# SAVE TO OBSIDIAN
-# --------------------------------
-def save_to_obsidian(emails):
-    """
-    Saves the fetched emails to an Obsidian file.
-    """
-    try:
-        if not emails:
-            print("⚠️ No new emails found.")
-            return False
-
-        os.makedirs(os.path.dirname(OBSIDIAN_PATH), exist_ok=True)
-
-        with open(OBSIDIAN_PATH, "a", encoding="utf-8") as f:
-            f.write(f"\n## 🗓️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("\n".join(emails))
-        
-        print(f"✅ Emails synced to Obsidian at {OBSIDIAN_PATH}")
-        return True
-
-    except Exception as e:
-        print(f"⚠️ Error saving to Obsidian: {e}")
-        return False
-
-# --------------------------------
-# SEND EMAIL NOTIFICATION
-# --------------------------------
-def send_email_notification(success=True):
-    """
-    Sends an email notification about the sync status.
-    """
-    subject = "✅ Email Sync Successful" if success else "⚠️ Email Sync Failed"
-    body = f"Email sync to Obsidian completed successfully!\nFile saved at: {OBSIDIAN_PATH}" if success else "Email sync encountered an issue."
-
-    msg = MIMEText(body)
-    msg["From"] = GMAIL_USER
-    msg["To"] = TO_EMAIL
-    msg["Subject"] = subject
-
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(GMAIL_USER, GMAIL_PASSWORD)
-        server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
-        server.quit()
-        print("✅ Email notification sent successfully!")
-    except Exception as e:
-        print(f"⚠️ Email notification failed: {e}")
+    return email_entries
 
 # --------------------------------
 # MAIN EXECUTION
 # --------------------------------
 if __name__ == "__main__":
     emails = fetch_emails()
-    success = save_to_obsidian(emails)
-    send_email_notification(success)
-    print("✅ Email fetching complete!")
+    if emails:
+        print("\n".join(emails))
+    else:
+        print("⚠️ No new emails found.")
