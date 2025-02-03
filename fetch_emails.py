@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 GMAIL_USER = "mikerkibbe73@gmail.com"
-GMAIL_PASSWORD = "your_generated_app_password"  # Use your App Password
+GMAIL_PASSWORD = "ch0c0l@te!"  # Use your App Password
 
 # Recipient Email
 TO_EMAIL = "mikerkibbe73@gmail.com"
