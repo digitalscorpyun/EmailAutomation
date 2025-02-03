@@ -13,7 +13,7 @@ from datetime import datetime
 IMAP_SERVER = "imap.gmail.com"
 IMAP_PORT = 993
 GMAIL_USER = "mikerkibbe73@gmail.com"
-GMAIL_PASSWORD = "ch0c0l@te!"  # Use your Gmail password
+GMAIL_PASSWORD = "Ch0c0l@te!"  # Use your Gmail password
 
 # Gmail SMTP Settings (For Sending Notifications)
 SMTP_SERVER = "smtp.gmail.com"
