@@ -1,129 +1,149 @@
+import imaplib
+import email
 import os
 import json
-import base64
-import datetime
-import re
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
 
 # --------------------------------
 # CONFIGURATION
 # --------------------------------
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+IMAP_SERVER = "imap.gmail.com"
+IMAP_PORT = 993
+
 CREDENTIALS_FILE = "credentials.json"
 TOKEN_FILE = "token.json"
+
+GMAIL_USER = "mikerkibbe73@gmail.com"
+TO_EMAIL = "mikerkibbe73@gmail.com"
+
 OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
+
 EMAIL_LIMIT = 10  # Number of emails to fetch
-MAX_BODY_LENGTH = 600  # Limit email body preview length
+
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 # --------------------------------
-# AUTHENTICATE GMAIL API
+# AUTHENTICATION FUNCTION
 # --------------------------------
 def authenticate_gmail():
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
-            with open(TOKEN_FILE, "w") as token:
-                token.write(creds.to_json())
-
+        with open(TOKEN_FILE, "w") as token:
+            token.write(creds.to_json())
     return creds
 
 # --------------------------------
-# FETCH EMAILS FROM GMAIL
+# FETCH EMAILS FUNCTION
 # --------------------------------
 def fetch_emails():
-    try:
-        creds = authenticate_gmail()
-        service = build("gmail", "v1", credentials=creds)
-        results = service.users().messages().list(userId="me", maxResults=EMAIL_LIMIT).execute()
-        messages = results.get("messages", [])
+    creds = authenticate_gmail()
+    mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+    mail.login(GMAIL_USER, creds.token)
+    mail.select("inbox")
 
-        email_entries = []
-        for msg in messages:
-            msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
-            payload = msg_data["payload"]
-            headers = payload["headers"]
+    result, data = mail.search(None, "ALL")
+    email_ids = data[0].split()[-EMAIL_LIMIT:]  # Get latest emails
 
-            subject = sender = date = "(Unknown)"
-            for header in headers:
-                if header["name"] == "Subject":
-                    subject = header["value"]
-                elif header["name"] == "From":
-                    sender = header["value"]
-                elif header["name"] == "Date":
-                    date = header["value"]
+    categories = {
+        "Important": [],
+        "Job Alerts": [],
+        "From Keywords": [],
+        "Other": []
+    }
 
-            # Extract email body (if available)
-            body = "(No email body found)"
-            if "parts" in payload:
-                for part in payload["parts"]:
-                    if part["mimeType"] == "text/plain":
-                        body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="ignore")
-                        break
+    keywords = ["AI", "Machine Learning", "Data Science", "Stargate"]  # Keywords to filter
 
-            # Remove tracking links and unsubscribe links
-            body = re.sub(r'https?://\S+', '', body)  # Remove URLs
-            body = re.sub(r'Unsubscribe.*', '', body, flags=re.IGNORECASE)  # Remove unsubscribe text
+    for num in email_ids:
+        result, msg_data = mail.fetch(num, "(RFC822)")
+        for response_part in msg_data:
+            if isinstance(response_part, tuple):
+                raw_email = response_part[1]
+                msg = email.message_from_bytes(raw_email)
 
-            # Trim body if too long
-            if len(body) > MAX_BODY_LENGTH:
-                body = body[:MAX_BODY_LENGTH] + "...\n\n[Read More in Gmail]"
+                subject = msg["Subject"] or "(No Subject)"
+                sender = msg["From"] or "(Unknown Sender)"
+                date = msg["Date"] or "(No Date)"
+                body = ""
 
-            # Format email entry with a collapsible section
-            email_entry = (
-                f"## 📬 {subject}\n"
-                f"- **📧 From:** {sender}\n"
-                f"- **📅 Date:** {date}\n\n"
-                f"### 📜 Email Content\n"
-                f"<details>\n"
-                f"  <summary>Click to expand</summary>\n\n"
-                f"  {body}\n\n"
-                f"</details>\n\n"
-                f"---\n"
-            )
-            email_entries.append(email_entry)
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            body = part.get_payload(decode=True).decode(errors="ignore")
+                            break
+                else:
+                    body = msg.get_payload(decode=True).decode(errors="ignore")
 
-        return email_entries
+                email_entry = f"### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body[:300]}...\n---\n"
 
-    except Exception as e:
-        print(f"⚠️ Error fetching emails: {e}")
-        return []
+                # Categorization logic
+                if "alert" in subject.lower() or "security" in subject.lower():
+                    categories["Important"].append(email_entry)
+                elif "job" in subject.lower() or "hiring" in subject.lower():
+                    categories["Job Alerts"].append(email_entry)
+                elif any(keyword.lower() in subject.lower() for keyword in keywords):
+                    categories["From Keywords"].append(email_entry)
+                else:
+                    categories["Other"].append(email_entry)
+
+    mail.logout()
+    return categories
 
 # --------------------------------
-# SAVE TO OBSIDIAN WITH TIMESTAMP
+# SAVE TO OBSIDIAN FUNCTION
 # --------------------------------
-def save_to_obsidian(emails):
+def save_to_obsidian(categories):
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    note_content = f"# 📨 Email Sync Log ({timestamp})\n\n"
+
+    for category, emails in categories.items():
+        if emails:
+            note_content += f"## {category}\n" + "\n".join(emails) + "\n"
+
+    with open(OBSIDIAN_PATH, "w", encoding="utf-8") as f:
+        f.write(note_content)
+
+    print(f"✅ Emails saved to Obsidian at {OBSIDIAN_PATH}")
+
+# --------------------------------
+# SEND NOTIFICATION FUNCTION
+# --------------------------------
+def send_email_notification(success=True):
+    subject = "✅ Email Sync Successful" if success else "⚠️ Email Sync Failed"
+    body = f"Email sync to Obsidian completed successfully!\nFile saved at: {OBSIDIAN_PATH}" if success else "Email sync encountered an issue."
+
+    msg = MIMEText(body)
+    msg["From"] = GMAIL_USER
+    msg["To"] = TO_EMAIL
+    msg["Subject"] = subject
+
     try:
-        if not emails:
-            print("⚠️ No new emails found.")
-            return False
-
-        os.makedirs(os.path.dirname(OBSIDIAN_PATH), exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        with open(OBSIDIAN_PATH, "a", encoding="utf-8") as f:
-            f.write(f"\n# 📬 Email Sync Log ({timestamp})\n\n")
-            f.write("\n".join(emails))
-        
-        print(f"✅ Emails successfully saved to Obsidian: {OBSIDIAN_PATH}")
-        return True
-
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(GMAIL_USER, "your-app-password")  # Use App Password if needed
+        server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
+        server.quit()
+        print("✅ Email notification sent successfully!")
     except Exception as e:
-        print(f"⚠️ Error saving to Obsidian: {e}")
-        return False
+        print(f"⚠️ Email notification failed: {e}")
 
 # --------------------------------
 # MAIN EXECUTION
 # --------------------------------
 if __name__ == "__main__":
-    emails = fetch_emails()
-    success = save_to_obsidian(emails)
+    categories = fetch_emails()
+    success = save_to_obsidian(categories)
+    send_email_notification(success)
     print("✅ Email fetching complete!")
