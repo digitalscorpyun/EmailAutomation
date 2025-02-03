@@ -6,19 +6,19 @@ from email.mime.text import MIMEText
 from datetime import datetime
 
 # --------------------------------
-# CONFIGURATION (GMAIL ONLY)
+# CONFIGURATION
 # --------------------------------
 
-# Gmail IMAP Settings (For Fetching Emails)
+# Gmail IMAP Settings
 IMAP_SERVER = "imap.gmail.com"
 IMAP_PORT = 993
-GMAIL_USER = "mikerkibbe73@gmail.com"
-GMAIL_PASSWORD = "w00d$On!"  # Use your Gmail password 
+GMAIL_USER = "your_gmail_email@gmail.com"
+GMAIL_PASSWORD = "your_gmail_app_password"
 
-# Gmail SMTP Settings (For Sending Notifications)
+# Gmail SMTP Settings (for notifications)
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-TO_EMAIL = "mikerkibbe73@gmail.com"  # Self-notifications
+TO_EMAIL = "your_gmail@gmail.com"  # Notification recipient
 
 # Obsidian File Path
 OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
@@ -27,9 +27,12 @@ OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.m
 EMAIL_LIMIT = 10  # Adjust as needed
 
 # --------------------------------
-# FETCH EMAILS FROM GMAIL
+# FETCH EMAILS
 # --------------------------------
 def fetch_emails():
+    """
+    Fetches the latest emails from the Gmail inbox.
+    """
     try:
         print("🔄 Connecting to Gmail IMAP server...")
         mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
@@ -78,6 +81,9 @@ def fetch_emails():
 # SAVE TO OBSIDIAN
 # --------------------------------
 def save_to_obsidian(emails):
+    """
+    Saves the fetched emails to an Obsidian file.
+    """
     try:
         if not emails:
             print("⚠️ No new emails found.")
@@ -100,6 +106,9 @@ def save_to_obsidian(emails):
 # SEND EMAIL NOTIFICATION
 # --------------------------------
 def send_email_notification(success=True):
+    """
+    Sends an email notification about the sync status.
+    """
     subject = "✅ Email Sync Successful" if success else "⚠️ Email Sync Failed"
     body = f"Email sync to Obsidian completed successfully!\nFile saved at: {OBSIDIAN_PATH}" if success else "Email sync encountered an issue."
 
