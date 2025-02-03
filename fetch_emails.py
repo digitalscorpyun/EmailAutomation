@@ -12,13 +12,13 @@ from datetime import datetime
 # Gmail IMAP Settings
 IMAP_SERVER = "imap.gmail.com"
 IMAP_PORT = 993
-GMAIL_USER = "your_gmail_email@gmail.com"
-GMAIL_PASSWORD = "your_gmail_app_password"
+GMAIL_USER = "mikerkibbe73@gmail.com"
+GMAIL_PASSWORD = "w00d$On!"
 
 # Gmail SMTP Settings (for notifications)
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
-TO_EMAIL = "your_gmail@gmail.com"  # Notification recipient
+TO_EMAIL = "mikerkibbe73@gmail.com"  # Notification recipient
 
 # Obsidian File Path
 OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
