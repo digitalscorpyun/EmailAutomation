@@ -2,7 +2,6 @@ import os
 import json
 import base64
 import datetime
-import re
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -18,8 +17,8 @@ TOKEN_FILE = "token.json"
 OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
 EMAIL_LIMIT = 10  # Adjust as needed
 
-# Keywords for classification
-IMPORTANT_KEYWORDS = ["security alert", "account notice"]
+# Categorization Keywords
+IMPORTANT_KEYWORDS = ["security alert", "account notice", "urgent"]
 JOB_ALERT_KEYWORDS = ["job alert", "hiring", "career opportunity"]
 TOPIC_KEYWORDS = ["AI", "ML", "Data Science", "Stargate"]  # Customize as needed
 
@@ -69,10 +68,10 @@ def fetch_emails():
         sender = next((h["value"] for h in headers if h["name"] == "From"), "(Unknown Sender)")
         date = next((h["value"] for h in headers if h["name"] == "Date"), "(No Date)")
 
-        body = ""
+        body = "(No Content)"
         if "parts" in msg_data["payload"]:
             for part in msg_data["payload"]["parts"]:
-                if part["mimeType"] == "text/plain":
+                if part["mimeType"] == "text/plain" and "data" in part["body"]:
                     body = base64.urlsafe_b64decode(part["body"]["data"]).decode(errors="ignore")
                     break
 
@@ -98,16 +97,16 @@ def save_to_obsidian(categorized_emails):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     email_log = f"# 📥 Email Sync Log ({timestamp})\n\n"
-    
+
     for category, emails in categorized_emails.items():
         if emails:
             email_log += f"## {category}\n" + "\n".join(emails) + "\n"
 
     os.makedirs(os.path.dirname(OBSIDIAN_PATH), exist_ok=True)
-    
+
     with open(OBSIDIAN_PATH, "w", encoding="utf-8") as f:
         f.write(email_log)
-    
+
     print(f"✅ Emails categorized and saved to Obsidian at {OBSIDIAN_PATH}")
 
 # -----------------------------
