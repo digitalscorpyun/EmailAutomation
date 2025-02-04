@@ -17,10 +17,8 @@ TOKEN_FILE = "token.json"
 OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
 EMAIL_LIMIT = 10  # Adjust as needed
 
-# Categorization Keywords
-IMPORTANT_KEYWORDS = ["security alert", "account notice", "urgent"]
-JOB_ALERT_KEYWORDS = ["job alert", "hiring", "career opportunity"]
-TOPIC_KEYWORDS = ["AI", "ML", "Data Science", "Stargate"]  # Customize as needed
+# **Filter Keywords** (Only emails containing these words will be fetched)
+FILTER_KEYWORDS = ["AI", "ML", "Data Science", "Stargate"]  # Customize as needed
 
 # -----------------------------
 # AUTHENTICATION
@@ -43,7 +41,7 @@ def authenticate_gmail():
     return creds
 
 # -----------------------------
-# FETCH EMAILS FROM GMAIL
+# FETCH EMAILS (ONLY MATCHING KEYWORDS)
 # -----------------------------
 
 def fetch_emails():
@@ -53,12 +51,7 @@ def fetch_emails():
     results = service.users().messages().list(userId="me", maxResults=EMAIL_LIMIT).execute()
     messages = results.get("messages", [])
 
-    categorized_emails = {
-        "Important": [],
-        "Job Alerts": [],
-        "From Keywords": [],
-        "Other": [],
-    }
+    keyword_emails = []
 
     for msg in messages:
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
@@ -75,45 +68,39 @@ def fetch_emails():
                     body = base64.urlsafe_b64decode(part["body"]["data"]).decode(errors="ignore")
                     break
 
-        # Categorize emails
-        email_entry = f"#### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body.strip()}\n---\n"
+        # **Only include emails that match FILTER_KEYWORDS**
+        if any(word.lower() in subject.lower() for word in FILTER_KEYWORDS):
+            email_entry = f"#### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body.strip()}\n---\n"
+            keyword_emails.append(email_entry)
 
-        if any(word.lower() in subject.lower() for word in IMPORTANT_KEYWORDS):
-            categorized_emails["Important"].append(email_entry)
-        elif any(word.lower() in subject.lower() for word in JOB_ALERT_KEYWORDS):
-            categorized_emails["Job Alerts"].append(email_entry)
-        elif any(word.lower() in subject.lower() for word in TOPIC_KEYWORDS):
-            categorized_emails["From Keywords"].append(email_entry)
-        else:
-            categorized_emails["Other"].append(email_entry)
-
-    return categorized_emails
+    return keyword_emails
 
 # -----------------------------
 # SAVE TO OBSIDIAN
 # -----------------------------
 
-def save_to_obsidian(categorized_emails):
+def save_to_obsidian(keyword_emails):
+    if not keyword_emails:
+        print("⚠️ No emails matched the keyword filters.")
+        return
+
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
     email_log = f"# 📥 Email Sync Log ({timestamp})\n\n"
 
-    for category, emails in categorized_emails.items():
-        if emails:
-            email_log += f"## {category}\n" + "\n".join(emails) + "\n"
+    email_log += "## 🔎 Emails Matching Keywords\n" + "\n".join(keyword_emails) + "\n"
 
     os.makedirs(os.path.dirname(OBSIDIAN_PATH), exist_ok=True)
 
     with open(OBSIDIAN_PATH, "w", encoding="utf-8") as f:
         f.write(email_log)
 
-    print(f"✅ Emails categorized and saved to Obsidian at {OBSIDIAN_PATH}")
+    print(f"✅ Filtered emails saved to Obsidian at {OBSIDIAN_PATH}")
 
 # -----------------------------
 # MAIN EXECUTION
 # -----------------------------
 
 if __name__ == "__main__":
-    categories = fetch_emails()
-    save_to_obsidian(categories)
-    print("✅ Email fetching and sorting complete!")
+    filtered_emails = fetch_emails()
+    save_to_obsidian(filtered_emails)
+    print("✅ Email fetching complete!")
