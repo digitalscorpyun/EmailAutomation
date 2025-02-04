@@ -1,29 +1,23 @@
 import os
 import imaplib
 import email
-import base64
+import pickle
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-import pickle
+import requests
 
 # Configuration
-IMAP_SERVER = "imap.gmail.com"
-IMAP_PORT = 993
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-OBSIDIAN_PATH = "C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
-EMAIL_LIMIT = 10
-KEYWORD = 'Python'
-
-# Load credentials from environment variables
-CLIENT_SECRET_FILE = os.getenv('CLIENT_SECRET_FILE')
-CREDENTIALS_FILE = os.getenv('CREDENTIALS_FILE')
+CLIENT_SECRET_FILE = "credentials.json"
+CREDENTIALS_FILE = "token.json"
 
 def load_credentials():
     """"Loads credentials from the CREDENTIALS_FILE if it exists, else creates a new one."""
     if os.path.exists(CREDENTIALS_FILE):
         with open(CREDENTIALS_FILE, 'rb') as token:
             creds = pickle.load(token)
+        # Refresh credentials if expired
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
     else:
         flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, scopes=['https://www.googleapis.com/auth/gmail.readonly'])
         creds = flow.run_local_server(port=0)
@@ -33,13 +27,17 @@ def load_credentials():
     return creds
 
 def fetch_emails(creds):
-    """Fetches emails using the provided credentials."""
-    mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
-    mail.login(creds.token, 'xoauth2')
+    """"Fetches emails using the provided credentials."""
+    mail = imaplib.IMAP4_SSL('imap.gmail.com', 993)
+    try:
+        mail.login(creds.token, 'xoauth2')
+    except imaplib.IMAP4.error as e:
+        print(f"Authentication failed: {e}")
+        return []
     mail.select("inbox")
 
     # Search for emails with the keyword in the subject
-    result, email_ids = mail.search(None, f'(SUBJECT "{KEYWORD}")')
+    result, email_ids = mail.search(None, '(SUBJECT "Python")')
     email_ids = result[0].split()
 
     email_entries = []
@@ -72,44 +70,10 @@ def fetch_emails(creds):
     mail.logout()
     return email_entries
 
-def save_to_obsidian(emails):
-    """Saves the fetched emails to an Obsidian file."""
-    if not emails:
-        print("⚠️ No new emails found.")
-        return False
-
-    os.makedirs(os.path.dirname(OBSIDIAN_PATH), exist_ok=True)
-
-    with open(OBSIDIAN_PATH, "a", encoding="utf-8") as f:
-        f.write(f"\n## 🗓️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write("\n".join(emails))
-
-    print(f"✅ Emails synced to Obsidian at {OBSIDIAN_PATH}")
-    return True
-
-def send_email_notification(success=True):
-    """Sends an email notification about the sync status."""
-    subject = "✅ Email Sync Successful" if success else "⚠️ Email Sync Failed"
-    body = f"Email sync to Obsidian completed successfully!\nFile saved at: {OBSIDIAN_PATH}" if success else "Email sync encountered an issue."
-
-    msg = MIMEText(body)
-    msg["From"] = GMAIL_USER
-    msg["To"] = TO_EMAIL
-    msg["Subject"] = subject
-
-    try:
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(GMAIL_USER, GMAIL_PASSWORD)
-        server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
-        server.quit()
-        print("✅ Email notification sent successfully!")
-    except Exception as e:
-        print(f"⚠️ Email notification failed: {e}")
-
 if __name__ == "__main__":
     creds = load_credentials()
     emails = fetch_emails(creds)
-    success = save_to_obsidian(emails)
-    send_email_notification(success)
-    print("✅ Email fetching complete!")
+    if emails:
+        print("\n".join(emails))
+    else:
+        print("No new emails found.")
