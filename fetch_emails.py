@@ -1,106 +1,89 @@
+import imaplib
+import email
 import os
-import json
-import base64
-import datetime
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime
 
-# -----------------------------
-# CONFIGURATION
-# -----------------------------
+# Configuration
+IMAP_SERVER = "imap.gmail.com"
+IMAP_PORT = 993
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+GMAIL_USER = "mikerkibbe73@gmail.com"
+GMAIL_PASSWORD = "w00d$On!"
+TO_EMAIL = "mikerkibbe73@gmail.com"  # Notification recipient
+OBSIDIAN_PATH = "C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
+EMAIL_LIMIT = 10
+KEYWORD = 'Python'
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-CREDENTIALS_FILE = "credentials.json"
-TOKEN_FILE = "token.json"
-OBSIDIAN_PATH = r"C:/Users/miker/OneDrive/Documents/Knowledge Hub/Inbox/Emails.md"
-EMAIL_LIMIT = 10  # Adjust as needed
+# Connect to Gmail IMAP server
+mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+mail.login(GMAIL_USER, GMAIL_PASSWORD)
+mail.select("inbox")
 
-# **Filter Keywords** (Only emails containing these words will be fetched)
-FILTER_KEYWORDS = ["AI", "ML", "Data Science", "Stargate"]  # Customize as needed
+# Search for emails with the keyword in the subject
+result, email_ids = mail.search(None, f'(SUBJECT "{KEYWORD}")')
+email_ids = email_ids[0].split()
 
-# -----------------------------
-# AUTHENTICATION
-# -----------------------------
+# Fetch latest X emails
+email_entries = []
+for num in email_ids[-EMAIL_LIMIT:]:
+    result, msg_data = mail.fetch(num, '(RFC822)')
+    for response_part in msg_data:
+        if isinstance(response_part, tuple):
+            raw_email = response_part[1]
+            msg = email.message_from_bytes(raw_email)
 
-def authenticate_gmail():
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-    
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(TOKEN_FILE, "w") as token:
-            token.write(creds.to_json())
-    
-    return creds
+            subject = msg["Subject"] or "(No Subject)"
+            sender = msg["From"] or "(Unknown Sender)"
+            date = msg["Date"] or "(No Date)"
+            body = ""
 
-# -----------------------------
-# FETCH EMAILS (ONLY MATCHING KEYWORDS)
-# -----------------------------
+            # Extract email body
+            if msg.is_multipart():
+                for part in msg.walk():
+                    content_type = part.get_content_type()
+                    if content_type == "text/plain":
+                        body = part.get_payload(decode=True).decode(errors="ignore")
+                        break
+            else:
+                body = msg.get_payload(decode=True).decode(errors="ignore")
 
-def fetch_emails():
-    creds = authenticate_gmail()
-    service = build("gmail", "v1", credentials=creds)
+            # Format email entry
+            email_entry = f"### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body}\n---\n"
+            email_entries.append(email_entry)
 
-    results = service.users().messages().list(userId="me", maxResults=EMAIL_LIMIT).execute()
-    messages = results.get("messages", [])
+# Close the IMAP connection
+mail.logout()
 
-    keyword_emails = []
-
-    for msg in messages:
-        msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
-        headers = msg_data["payload"]["headers"]
-
-        subject = next((h["value"] for h in headers if h["name"] == "Subject"), "(No Subject)")
-        sender = next((h["value"] for h in headers if h["name"] == "From"), "(Unknown Sender)")
-        date = next((h["value"] for h in headers if h["name"] == "Date"), "(No Date)")
-
-        body = "(No Content)"
-        if "parts" in msg_data["payload"]:
-            for part in msg_data["payload"]["parts"]:
-                if part["mimeType"] == "text/plain" and "data" in part["body"]:
-                    body = base64.urlsafe_b64decode(part["body"]["data"]).decode(errors="ignore")
-                    break
-
-        # **Only include emails that match FILTER_KEYWORDS**
-        if any(word.lower() in subject.lower() for word in FILTER_KEYWORDS):
-            email_entry = f"#### 📧 {subject}\n- **From:** {sender}\n- **Date:** {date}\n\n{body.strip()}\n---\n"
-            keyword_emails.append(email_entry)
-
-    return keyword_emails
-
-# -----------------------------
-# SAVE TO OBSIDIAN
-# -----------------------------
-
-def save_to_obsidian(keyword_emails):
-    if not keyword_emails:
-        print("⚠️ No emails matched the keyword filters.")
-        return
-
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    email_log = f"# 📥 Email Sync Log ({timestamp})\n\n"
-
-    email_log += "## 🔎 Emails Matching Keywords\n" + "\n".join(keyword_emails) + "\n"
-
+# Save to Obsidian
+if email_entries:
     os.makedirs(os.path.dirname(OBSIDIAN_PATH), exist_ok=True)
+    with open(OBSIDIAN_PATH, "a", encoding="utf-8") as f:
+        f.write(f"\n## 🗓️ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("\n".join(email_entries))
+    print(f"✅ Emails synced to Obsidian at {OBSIDIAN_PATH}")
+else:
+    print("⚠️ No new emails found.")
 
-    with open(OBSIDIAN_PATH, "w", encoding="utf-8") as f:
-        f.write(email_log)
+# Send email notification
+def send_email_notification(success=True):
+    subject = "✅ Email Sync Successful" if success else "⚠️ Email Sync Failed"
+    body = f"Email sync to Obsidian completed successfully!\nFile saved at: {OBSIDIAN_PATH}" if success else "Email sync encountered an issue."
+    msg = MIMEText(body)
+    msg["From"] = GMAIL_USER
+    msg["To"] = TO_EMAIL
+    msg["Subject"] = subject
 
-    print(f"✅ Filtered emails saved to Obsidian at {OBSIDIAN_PATH}")
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(GMAIL_USER, GMAIL_PASSWORD)
+        server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
+        server.quit()
+        print("✅ Email notification sent successfully!")
+    except Exception as e:
+        print(f"⚠️ Email notification failed: {e}")
 
-# -----------------------------
-# MAIN EXECUTION
-# -----------------------------
-
-if __name__ == "__main__":
-    filtered_emails = fetch_emails()
-    save_to_obsidian(filtered_emails)
-    print("✅ Email fetching complete!")
+send_email_notification(True)
